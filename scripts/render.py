@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import the NeRF model
 from models.nerf import NeRF
 
-def render_scene(model_path, H=64, W=64, num_rays=1024):
+def render_scene(model_path, H=128, W=128, num_rays=1024):
     """
     Render a scene using the trained NeRF model.
     Args:
@@ -26,8 +26,8 @@ def render_scene(model_path, H=64, W=64, num_rays=1024):
 
     # Prepare the rendering grid
     grid_x, grid_y = torch.meshgrid(
-        torch.linspace(-1, 1, W),
-        torch.linspace(-1, 1, H),
+        torch.linspace(-2, 2, W),
+        torch.linspace(-2, 2, H),
         indexing="ij"
     )
     rays = torch.stack([grid_x.flatten(), grid_y.flatten(), torch.ones_like(grid_x.flatten())], dim=-1)
