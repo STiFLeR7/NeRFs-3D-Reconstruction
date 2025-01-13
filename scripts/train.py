@@ -2,7 +2,8 @@ import sys
 import os
 import torch
 import torch.optim as optim
-
+import matplotlib.pyplot as plt
+import numpy as np
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,7 +26,7 @@ def train_nerf():
 
     # Initialize the NeRF model
     model = NeRF()
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)
     criterion = torch.nn.MSELoss()
 
     # Training loop
@@ -56,6 +57,7 @@ def train_nerf():
             optimizer.step()
 
             print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(images)}], Loss: {loss.item():.4f}")
+
 
     # Save the trained model
     model_save_path = "trained_nerf.pth"
