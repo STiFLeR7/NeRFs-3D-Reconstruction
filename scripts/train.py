@@ -3,7 +3,7 @@ import os
 import torch
 import torch.optim as optim
 import matplotlib.pyplot as plt
-import numpy as np
+
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,22 +33,20 @@ def train_nerf():
     num_epochs = 5
     for epoch in range(num_epochs):
         for i, image in enumerate(images):
-            H, W, C = image.shape  # Height, Width, Channels
-            num_rays = 1024  # Number of rays to sample per batch
+            H, W, C = image.shape
+            num_rays = 1024
 
-            # Sample random rays
-            ray_indices = torch.randint(0, H * W, (num_rays,))
-            sampled_pixels = image.reshape(-1, C)[ray_indices]
-            targets = torch.tensor(sampled_pixels[:, :3], dtype=torch.float32)  # Only RGB values
+            # Generate rays based on camera intrinsics
+            fx, fy, cx, cy = intrinsics["focal_length"], intrinsics["focal_length"], W / 2, H / 2
+            xs = torch.randint(0, W, (num_rays,))
+            ys = torch.randint(0, H, (num_rays,))
+            pixel_coords = torch.stack([(xs - cx) / fx, -(ys - cy) / fy, -torch.ones_like(xs)], dim=-1)
 
-            # Generate random 3D rays (example: normalized coordinates)
-            rays = torch.rand((num_rays, 3), dtype=torch.float32)
+            # Convert targets to PyTorch tensor
+            targets = torch.tensor(image[ys, xs], dtype=torch.float32)
 
             # Forward pass
-            outputs = model(rays)
-            print(f"Outputs shape: {outputs.shape}, Targets shape: {targets.shape}")  # Debug
-
-            # Loss calculation
+            outputs = model(pixel_coords.float())
             loss = criterion(outputs, targets)
 
             # Backward pass
@@ -58,11 +56,9 @@ def train_nerf():
 
             print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(images)}], Loss: {loss.item():.4f}")
 
-
     # Save the trained model
-    model_save_path = "trained_nerf.pth"
-    torch.save(model.state_dict(), model_save_path)
-    print(f"Model saved to {model_save_path}")
+    torch.save(model.state_dict(), "trained_nerf.pth")
+    print("Model saved to trained_nerf.pth")
 
 if __name__ == "__main__":
     train_nerf()

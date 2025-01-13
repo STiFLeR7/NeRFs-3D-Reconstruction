@@ -1,56 +1,48 @@
+import sys
+import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
 # Add the project root directory to the Python path
-import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the NeRF model
 from models.nerf import NeRF
+from utils.data_loader import load_camera_params
 
-def render_scene(model_path, H=128, W=128, num_rays=1024):
-    """
-    Render a scene using the trained NeRF model.
-    Args:
-        model_path (str): Path to the trained model file.
-        H (int): Height of the rendered image.
-        W (int): Width of the rendered image.
-        num_rays (int): Number of rays per batch for rendering.
-    """
+# Settings
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_path = "./trained_nerf.pth"
+
+def render_scene():
     # Load the trained model
-    model = NeRF()
+    model = NeRF().to(device)
     model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    # Prepare the rendering grid
-    grid_x, grid_y = torch.meshgrid(
-        torch.linspace(-2, 2, W),
-        torch.linspace(-2, 2, H),
-        indexing="ij"
-    )
-    rays = torch.stack([grid_x.flatten(), grid_y.flatten(), torch.ones_like(grid_x.flatten())], dim=-1)
+    # Set rendering resolution and intrinsics
+    H, W = 100, 100
+    intrinsics = {"focal_length": 50.0}  # Example focal length
+    fx, fy, cx, cy = intrinsics["focal_length"], intrinsics["focal_length"], W / 2, H / 2
 
-    # Predict colors for all rays
-    rendered_image = []
+    # Generate rays
+    ys, xs = torch.meshgrid(torch.arange(H), torch.arange(W), indexing="ij")
+    pixel_coords = torch.stack([(xs - cx) / fx, -(ys - cy) / fy, -torch.ones_like(xs)], dim=-1)
+    rays = pixel_coords.reshape(-1, 3).to(device)
+
+    # Render scene
     with torch.no_grad():
-        for i in range(0, rays.shape[0], num_rays):
-            ray_batch = rays[i:i + num_rays]
-            colors = model(ray_batch)
-            rendered_image.append(colors.numpy())
+        outputs = model(rays).cpu().numpy()
 
-    # Combine all batches into a full image
-    rendered_image = np.concatenate(rendered_image, axis=0)
-    rendered_image = rendered_image.reshape(H, W, 3)  # Reshape into image dimensions
+    # Reshape outputs to image dimensions
+    outputs = outputs.reshape(H, W, -1)
 
-    # Display the rendered image
-    plt.imshow(rendered_image)
-    plt.axis("off")
+    # Display rendered scene
+    plt.imshow(outputs.clip(0, 1))
     plt.title("Rendered Scene")
+    plt.axis("off")
     plt.show()
 
 if __name__ == "__main__":
-    # Path to the saved model
-    model_path = "trained_nerf.pth"
-    render_scene(model_path)
+    render_scene()
