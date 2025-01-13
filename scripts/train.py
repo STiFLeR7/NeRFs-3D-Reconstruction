@@ -32,17 +32,22 @@ def train_nerf():
     num_epochs = 5
     for epoch in range(num_epochs):
         for i, image in enumerate(images):
-            # Sample random rays
-            H, W, _ = image.shape
+            H, W, C = image.shape  # Height, Width, Channels
             num_rays = 1024  # Number of rays to sample per batch
-            rays = torch.rand((num_rays, 3))  # Random 3D points in normalized space
 
-            # Compute targets (RGB values) for sampled rays
-            sampled_pixels = image[:num_rays].reshape(num_rays, -1)
-            targets = torch.tensor(sampled_pixels, dtype=torch.float32)
+            # Sample random rays
+            ray_indices = torch.randint(0, H * W, (num_rays,))
+            sampled_pixels = image.reshape(-1, C)[ray_indices]
+            targets = torch.tensor(sampled_pixels[:, :3], dtype=torch.float32)  # Only RGB values
+
+            # Generate random 3D rays (example: normalized coordinates)
+            rays = torch.rand((num_rays, 3), dtype=torch.float32)
 
             # Forward pass
             outputs = model(rays)
+            print(f"Outputs shape: {outputs.shape}, Targets shape: {targets.shape}")  # Debug
+
+            # Loss calculation
             loss = criterion(outputs, targets)
 
             # Backward pass
@@ -51,6 +56,11 @@ def train_nerf():
             optimizer.step()
 
             print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(images)}], Loss: {loss.item():.4f}")
+
+    # Save the trained model
+    model_save_path = "trained_nerf.pth"
+    torch.save(model.state_dict(), model_save_path)
+    print(f"Model saved to {model_save_path}")
 
 if __name__ == "__main__":
     train_nerf()
