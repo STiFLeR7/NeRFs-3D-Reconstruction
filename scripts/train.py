@@ -1,9 +1,16 @@
+import sys
+import os
 import torch
 import torch.optim as optim
+
+# Add the project root directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import custom modules
 from models.nerf import NeRF
 from utils.data_loader import load_images, load_camera_params
 from utils.preprocess import preprocess_data
-from models.nerf import NeRF
+
 def train_nerf():
     dataset_dir = "D:/NeRFs-3D-Reconstruction/data/lego"
     train_images_dir = f"{dataset_dir}/train"
@@ -25,12 +32,17 @@ def train_nerf():
     num_epochs = 5
     for epoch in range(num_epochs):
         for i, image in enumerate(images):
-            # Prepare inputs and targets
-            inputs = torch.tensor(image, dtype=torch.float32).flatten()
-            targets = inputs  # Target is the same as input for reconstruction
+            # Sample random rays
+            H, W, _ = image.shape
+            num_rays = 1024  # Number of rays to sample per batch
+            rays = torch.rand((num_rays, 3))  # Random 3D points in normalized space
+
+            # Compute targets (RGB values) for sampled rays
+            sampled_pixels = image[:num_rays].reshape(num_rays, -1)
+            targets = torch.tensor(sampled_pixels, dtype=torch.float32)
 
             # Forward pass
-            outputs = model(inputs)
+            outputs = model(rays)
             loss = criterion(outputs, targets)
 
             # Backward pass
