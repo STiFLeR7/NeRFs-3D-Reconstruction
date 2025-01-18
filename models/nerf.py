@@ -1,37 +1,44 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class NeRF(nn.Module):
-    def __init__(self, input_dim=3, hidden_dim=256, num_layers=8):
+    def __init__(self, depth=8, width=256):
         """
         Initialize the NeRF model.
         Args:
-            input_dim (int): Input dimension (e.g., 3 for (x, y, z) coordinates).
-            hidden_dim (int): Number of neurons in hidden layers.
-            num_layers (int): Total number of layers in the MLP.
+            depth: Number of layers in the MLP.
+            width: Number of neurons per layer.
         """
         super(NeRF, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
+        self.depth = depth
+        self.width = width
 
-        # Define MLP layers
-        layers = []
-        for i in range(num_layers):
-            in_dim = input_dim if i == 0 else hidden_dim
-            out_dim = hidden_dim
-            layers.append(nn.Linear(in_dim, out_dim))
-            layers.append(nn.ReLU())
-        layers.append(nn.Linear(hidden_dim, 4))  # RGB (3) + density (1)
-        self.mlp = nn.Sequential(*layers)
+        # Input Layer
+        self.input_layer = nn.Linear(6, width)  # 3 for rays_o + 3 for rays_d
 
-    def forward(self, x):
+        # Hidden Layers
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(width, width) for _ in range(depth - 1)]
+        )
+
+        # Output Layer
+        self.output_layer = nn.Linear(width, 3)  # RGB values
+
+    def forward(self, rays):
         """
         Forward pass for the NeRF model.
         Args:
-            x (torch.Tensor): Input tensor of shape (num_rays, input_dim).
+            rays: Tensor of shape (N, 6), where:
+                  - N is the number of rays
+                  - 6 = 3 (ray origins) + 3 (ray directions)
         Returns:
-            torch.Tensor: Output tensor of shape (num_rays, 3) for RGB.
+            A tensor of shape (N, 3), representing the predicted RGB values.
         """
-        outputs = self.mlp(x)
-        return outputs[:, :3]  # Return only the RGB values
+        x = F.relu(self.input_layer(rays))
+
+        for layer in self.hidden_layers:
+            x = F.relu(layer(x))
+
+        x = self.output_layer(x)  # Final RGB prediction
+        return x
