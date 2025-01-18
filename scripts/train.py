@@ -7,13 +7,21 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
+from models.nerf import NeRF
 
-# Add the project root to Python's module search path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Add the project root directory to Python's module search path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Import NeRF model
+# Debug import paths
+print("Current sys.path:")
+print("\n".join(sys.path))
+print("Project root exists:", os.path.exists(project_root))
+print("Models directory exists:", os.path.exists(os.path.join(project_root, "models")))
+print("nerf.py exists:", os.path.exists(os.path.join(project_root, "models", "nerf.py")))
+
+# Import the NeRF model
 from models.nerf import NeRF
 
 # Hyperparameters
@@ -73,26 +81,30 @@ def generate_rays(poses, focal_length):
 # Train NeRF
 def train_nerf():
     images, poses, intrinsics = load_training_data()
-    focal_length = intrinsics["focal_length"]
+    focal_length = torch.tensor(intrinsics["focal_length"], device=device)
 
-    model = NeRF().to(device)
+    model = NeRF().to(device)  # Ensure model is on the correct device
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
     for epoch in range(num_epochs):
         total_loss = 0
         for i in range(0, len(images), batch_size):
-            batch_images = images[i:i + batch_size]
-            batch_poses = poses[i:i + batch_size]
+            # Move batch data to device
+            batch_images = images[i:i + batch_size].to(device)
+            batch_poses = poses[i:i + batch_size].to(device)
 
             # Generate rays
             rays_o, rays_d = generate_rays(batch_poses, focal_length)
-            rays_o = rays_o.view(-1, 3)
-            rays_d = rays_d.view(-1, 3)
-            targets = batch_images.permute(0, 2, 3, 1).view(-1, 3)
+            rays_o = rays_o.reshape(-1, 3).to(device)
+            rays_d = rays_d.reshape(-1, 3).to(device)
+            rays = torch.cat([rays_o, rays_d], dim=-1).to(device)
+
+            # Prepare targets
+            targets = batch_images.permute(0, 2, 3, 1).reshape(-1, 3).to(device)
 
             # Forward pass
-            outputs = model(rays_o, rays_d)
+            outputs = model(rays)
             loss = criterion(outputs, targets)
 
             # Backward pass
