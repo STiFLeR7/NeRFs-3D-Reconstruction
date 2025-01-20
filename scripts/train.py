@@ -26,7 +26,7 @@ from models.nerf import NeRF
 # Hyperparameters
 learning_rate = 1e-4
 num_epochs = 5
-batch_size = 4
+batch_size = 1
 image_size = (800, 800)  # H, W
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -59,38 +59,36 @@ def load_training_data():
         raise ValueError("No valid poses found in JSON file.")
 
     images = torch.stack(images, dim=0)
-    poses = torch.tensor(np.stack(poses, axis=0))
+    poses = torch.tensor(np.stack(poses, axis=0), dtype=torch.float)  # Ensure float dtype
     return images, poses, intrinsics
 
 # Generate rays
 def generate_rays(poses, focal_length):
     H, W = image_size
-    device = poses.device  # Get the device of the poses tensor
+    device = poses.device
 
-    # Create meshgrid and move it to the correct device
+    # Create meshgrid
     i, j = torch.meshgrid(
-        torch.linspace(0, W - 1, W, device=device), 
-        torch.linspace(0, H - 1, H, device=device), 
+        torch.linspace(0, W - 1, W, device=device, dtype=torch.float),
+        torch.linspace(0, H - 1, H, device=device, dtype=torch.float),
         indexing="ij"
     )
 
-    # Compute ray directions and move everything to the same device
     dirs = torch.stack(
         [(i - W * 0.5) / focal_length, -(j - H * 0.5) / focal_length, -torch.ones_like(i)],
         dim=-1,
     )
 
-    # Rotate ray directions using pose matrices
+    # Rotate ray directions
     rays_d = torch.einsum("hwc,bij->bhwi", dirs, poses[:, :3, :3])  # Rotate ray directions
     rays_o = poses[:, None, None, :3, 3].expand(rays_d.shape)  # Repeat camera origin
 
     return rays_o, rays_d
 
-
 # Train NeRF
 def train_nerf():
     images, poses, intrinsics = load_training_data()
-    focal_length = torch.tensor(intrinsics["focal_length"], device=device)
+    focal_length = torch.tensor(intrinsics["focal_length"], device=device, dtype=torch.float)
 
     model = NeRF().to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -99,16 +97,18 @@ def train_nerf():
     for epoch in range(num_epochs):
         total_loss = 0
         for i in range(0, len(images), batch_size):
+            # Move batch data to device
             batch_images = images[i:i + batch_size].to(device)
             batch_poses = poses[i:i + batch_size].to(device)
 
             # Generate rays
             rays_o, rays_d = generate_rays(batch_poses, focal_length)
-            rays_o = rays_o.reshape(-1, 3).to(device)
-            rays_d = rays_d.reshape(-1, 3).to(device)
-            rays = torch.cat([rays_o, rays_d], dim=-1).to(device)
+            rays_o = rays_o.reshape(-1, 3)
+            rays_d = rays_d.reshape(-1, 3)
+            rays = torch.cat([rays_o, rays_d], dim=-1)
 
-            targets = batch_images.permute(0, 2, 3, 1).reshape(-1, 3).to(device)
+            # Prepare targets
+            targets = batch_images.permute(0, 2, 3, 1).reshape(-1, 3)
 
             # Forward pass
             outputs = model(rays)
