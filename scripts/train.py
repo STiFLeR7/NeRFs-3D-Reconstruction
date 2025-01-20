@@ -25,7 +25,7 @@ from models.nerf import NeRF
 
 # Hyperparameters
 learning_rate = 1e-4
-num_epochs = 5
+num_epochs = 10
 batch_size = 1
 image_size = (800, 800)  # H, W
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -94,6 +94,9 @@ def train_nerf():
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
+    # Learning rate scheduler
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.5)
+
     for epoch in range(num_epochs):
         total_loss = 0
         for i in range(0, len(images), batch_size):
@@ -121,7 +124,16 @@ def train_nerf():
 
             total_loss += loss.item()
 
+        scheduler.step()
+
         print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(images):.4f}")
+
+        # Save intermediate outputs
+        if epoch % 2 == 0:  # Save every 2 epochs
+            output_image = outputs.reshape(batch_images.shape)
+            save_path = os.path.join("visuals", f"epoch_{epoch}.png")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            transforms.ToPILImage()(output_image.cpu()).save(save_path)
 
     # Save the model
     model_path = os.path.join("checkpoints", "nerf_model.pth")
