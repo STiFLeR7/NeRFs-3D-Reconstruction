@@ -1,97 +1,136 @@
-import os
-import sys
+import json
 import torch
-import torch.optim as optim
-import torch.nn as nn
-from torchvision import transforms
-from PIL import Image
 import numpy as np
+from PIL import Image
+from torchvision import transforms
+from models.nerf import NeRF
+import sys
+import os
 
 # Add the project root directory to Python's module search path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
-    sys.path.append(project_root)
+    sys.path.insert(0, project_root)
 
-# Import NeRF model
+# Debugging paths
+print("Current sys.path:", sys.path)
+print("Models directory exists:", os.path.exists(os.path.join(project_root, "models")))
+print("nerf.py exists:", os.path.exists(os.path.join(project_root, "models", "nerf.py")))
+
+# Import NeRF
 from models.nerf import NeRF
 
-# Hyperparameters
-learning_rate = 1e-3
-num_epochs = 5
-batch_size = 32
-
+# Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Data loading function
+# Load dataset (images and poses from JSON)
 def load_training_data(data_path):
     images = []
     poses = []
-    intrinsics = {"focal_length": 555.0}  # Set a default focal length
+    intrinsics = None
+
+    # Path to the JSON file
+    json_file = os.path.join(data_path, "transforms_train.json")
+    if not os.path.exists(json_file):
+        raise FileNotFoundError(f"JSON file not found: {json_file}")
+
+    # Load JSON
+    with open(json_file, "r") as f:
+        metadata = json.load(f)
+
+    # Extract intrinsics (focal length)
+    camera_angle_x = metadata["camera_angle_x"]
+    focal_length = 0.5 * 800 / np.tan(0.5 * camera_angle_x)  # Adjust 800 to match your image width
+    intrinsics = {"focal_length": focal_length}
 
     # Load images and poses
-    for file in os.listdir(data_path):
-        if file.endswith(".png") or file.endswith(".jpg"):
-            img = Image.open(os.path.join(data_path, file)).convert("RGB")
+    for frame in metadata["frames"]:
+        # Load image
+        file_path = frame["file_path"]
+        image_path = os.path.join(data_path, file_path + ".png")
+        if os.path.exists(image_path):
+            img = Image.open(image_path).convert("RGB")
             img = transforms.ToTensor()(img)
             images.append(img)
+        else:
+            print(f"Warning: Image not found {image_path}")
 
-        elif file.endswith(".npy"):
-            pose = np.load(os.path.join(data_path, file))
-            poses.append(pose)
+        # Load pose
+        pose_matrix = np.array(frame["transform_matrix"])
+        if pose_matrix.shape == (4, 4):
+            poses.append(pose_matrix)
+        else:
+            print(f"Warning: Invalid pose matrix in {file_path}")
 
+    if not poses:
+        raise ValueError("No valid poses found in JSON file.")
+
+    # Convert to tensors
     images = torch.stack(images, dim=0)
-    poses = torch.tensor(poses)
+    poses = torch.tensor(poses, dtype=torch.float32)
 
+    print(f"Loaded {len(images)} images and {len(poses)} poses.")
     return images, poses, intrinsics
 
-# Ray generation function
-def generate_rays(poses, focal_length):
-    H, W = 800, 800  # Assuming fixed image dimensions
-    i, j = torch.meshgrid(torch.linspace(0, W - 1, W), torch.linspace(0, H - 1, H))
-    i, j = i.t(), j.t()
-    dirs = torch.stack([(i - W * 0.5) / focal_length, -(j - H * 0.5) / focal_length, -torch.ones_like(i)], dim=-1)
-    rays_d = torch.sum(dirs[..., None, :] * poses[:, :3, :3], dim=-1)  # Rotate ray directions
-    rays_o = poses[:, :3, 3].expand(rays_d.shape)  # Origin is repeated
-    return rays_o, rays_d
+# Generate rays
+def generate_rays(pose, focal_length, H=800, W=800):
+    i, j = torch.meshgrid(
+        torch.linspace(0, W - 1, W, device=device),
+        torch.linspace(0, H - 1, H, device=device),
+        indexing="ij"
+    )
 
-# Load dataset
-data_path = "data/lego/train"  # Update path if needed
-images, poses, intrinsics = load_training_data(data_path)
-images = images.to(device)
-poses = poses.to(device)
-focal_length = intrinsics["focal_length"]
+    # Normalize directions
+    dirs = torch.stack(
+        [(i - W * 0.5) / focal_length, -(j - H * 0.5) / focal_length, -torch.ones_like(i)],
+        dim=-1
+    )
 
-# Initialize NeRF model
-model = NeRF().to(device)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-criterion = nn.MSELoss()
+    # Rotate ray directions
+    rays_d = torch.einsum("hwc,rc->hwr", dirs, pose[:3, :3])  # Rotate ray directions
+    rays_o = pose[:3, -1].expand(rays_d.shape)  # Repeat camera origin
 
-# Training loop
-def train_nerf():
-    model.train()
-    for epoch in range(num_epochs):
-        total_loss = 0
-        for i in range(0, len(images), batch_size):
-            batch_images = images[i:i + batch_size]
-            batch_poses = poses[i:i + batch_size]
+    return rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
 
-            # Generate rays
-            rays_o, rays_d = generate_rays(batch_poses, focal_length)
+# Render the scene
+def render_scene(model, pose, focal_length, H=800, W=800):
+    rays_o, rays_d = generate_rays(pose, focal_length, H, W)
+    rays = torch.cat([rays_o, rays_d], dim=-1)  # Combine rays (N, 6)
 
-            # Forward pass
-            outputs = model(rays_o, rays_d)
-            targets = batch_images.view(-1, 3)  # Flatten image pixels
-            loss = criterion(outputs, targets)
+    # Predict RGB values
+    with torch.no_grad():
+        rgb = model(rays).reshape(H, W, 3).cpu().numpy()
 
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    # Normalize RGB values to [0, 1]
+    rgb_min, rgb_max = rgb.min(), rgb.max()
+    if rgb_max > rgb_min:  # Avoid division by zero
+        rgb = (rgb - rgb_min) / (rgb_max - rgb_min)
 
-            total_loss += loss.item()
+    return rgb
 
-        avg_loss = total_loss / (len(images) // batch_size)
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}")
+# Main function
+def main():
+    data_path = "data/lego"
+    checkpoint_path = "checkpoints/nerf_model.pth"
+    output_dir = "renders"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load data and model
+    images, poses, intrinsics = load_training_data(data_path)
+    model = NeRF().to(device)
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.eval()
+
+    # Render unseen views
+    focal_length = intrinsics["focal_length"]
+    for idx, pose in enumerate(poses):
+        print(f"Rendering view {idx + 1}/{len(poses)}...")
+        rgb_image = render_scene(model, pose, focal_length)
+
+        # Save rendered image
+        save_path = os.path.join(output_dir, f"rendered_view_{idx + 1:03d}.png")
+        Image.fromarray((rgb_image * 255).astype(np.uint8)).save(save_path)
+        print(f"Saved rendered image to {save_path}")
 
 if __name__ == "__main__":
-    train_nerf()
+    main()
