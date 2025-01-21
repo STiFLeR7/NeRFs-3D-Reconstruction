@@ -3,7 +3,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-
+import json
 # Add the project root directory to Python's module search path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
@@ -46,7 +46,6 @@ def generate_rays(H, W, focal_length, pose):
     return rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
 
 # Render the scene
-# Render the scene
 def render_scene(model, H, W, focal_length, pose):
     rays_o, rays_d = generate_rays(H, W, focal_length, pose)
     rays = torch.cat([rays_o, rays_d], dim=-1)
@@ -62,28 +61,41 @@ def render_scene(model, H, W, focal_length, pose):
     
     return rgb
 
-
 # Visualize the rendered image
 def visualize():
     # Model checkpoint
     checkpoint_path = "checkpoints/nerf_model.pth"
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
+    
     model = load_model(checkpoint_path)
 
     # Render settings
     H, W = 400, 400  # Image height and width
     focal_length = 500.0  # Example focal length
-    pose = torch.eye(4, device=device)  # Identity pose (looking straight at the scene)
 
-    # Render the scene
-    print("Rendering the scene...")
-    rgb = render_scene(model, H, W, focal_length, pose)
+    # Use test dataset poses
+    data_path = "data/lego/"
+    json_file = os.path.join(data_path, "transforms_test.json")
+    if not os.path.exists(json_file):
+        raise FileNotFoundError(f"Test dataset JSON file not found at {json_file}")
 
-    # Display the rendered image
-    plt.figure(figsize=(8, 8))
-    plt.imshow(np.clip(rgb, 0, 1))
-    plt.axis("off")
-    plt.title("Rendered Scene")
-    plt.show()
+    # Load test poses
+    with open(json_file, "r") as f:
+        meta = json.load(f)
+
+    for idx, frame in enumerate(meta["frames"]):
+        pose = torch.tensor(frame["transform_matrix"], dtype=torch.float32, device=device)
+
+        # Render the scene
+        print(f"Rendering view {idx + 1}...")
+        rgb = render_scene(model, H, W, focal_length, pose)
+
+        # Save the rendered image
+        save_path = os.path.join("renders", f"test_view_{idx + 1}.png")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.imsave(save_path, np.clip(rgb, 0, 1))
+        print(f"Saved rendered view {idx + 1} to {save_path}")
 
 if __name__ == "__main__":
     visualize()

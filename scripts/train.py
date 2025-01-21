@@ -129,11 +129,23 @@ def train_nerf():
         print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(images):.4f}")
 
         # Save intermediate outputs
-        if epoch % 2 == 0:  # Save every 2 epochs
-            output_image = outputs.reshape(batch_images.shape)
-            save_path = os.path.join("visuals", f"epoch_{epoch}.png")
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            transforms.ToPILImage()(output_image.cpu()).save(save_path)
+        
+    if epoch % 2 == 0:  # Save every 2 epochs
+        output_image = outputs.reshape(batch_images.shape).detach().cpu()
+
+    # Take the first image in the batch
+        output_image = output_image[0].permute(1, 2, 0)  # Change to H x W x C
+
+    # Normalize values to [0, 1] for saving
+        output_image = (output_image - output_image.min()) / (output_image.max() - output_image.min())
+    
+    # Ensure visuals directory exists
+        save_path = os.path.join("visuals", f"epoch_{epoch}.png")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # Save image
+        transforms.ToPILImage()(output_image).save(save_path)
+        print(f"Saved rendered output for epoch {epoch} to {save_path}")
 
     # Save the model
     model_path = os.path.join("checkpoints", "nerf_model.pth")
